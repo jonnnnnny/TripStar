@@ -65,7 +65,7 @@
   "home": {
     "heroBadge": "AI 智能行程规划引擎",
     "titleLine": "探索世界的每一种可能",
-    "heroDesc": "告诉我你的目的地与偏好，AI 将为你定制一份独一无二的旅程方案",
+    "heroDesc": "告诉我你想去的景点与偏好，AI 将为你定制一份独一无二的旅程方案",
     "nav": {
       "cta": "开始定制",
       "fogOn": "雾气开启",
@@ -77,7 +77,7 @@
     "cityNLabel": "城市 {n}",
     "atLeastOneCity": "请至少添加一个城市",
     "totalDays": "总计 {n} 天",
-    "step1": "目的地与行程",
+    "step1": "目标景点与行程",
     "step2": "偏好设置",
     "step3": "特殊需求",
     "cityLabel": "目的地城市",
@@ -147,8 +147,14 @@
       "selectDate": "请选择日期",
       "generateSuccess": "旅行计划生成成功!",
       "generateFailed": "生成失败",
-      "generateRetry": "生成旅行计划失败，请稍后重试"
-    }
+      "generateRetry": "生成旅行计划失败，请稍后重试",
+      "attractionDuplicate": "该景点已添加",
+      "attractionTooMany": "最多添加 10 个景点"
+    },
+    "attractionLabel": "目标景点",
+    "attractionPlaceholder": "输入景点名称，回车添加，例如：故宫",
+    "attractionAdd": "添加",
+    "attractionRequired": "请至少添加一个目标景点"
   },
   "result": {
     "backHome": "返回首页",

@@ -65,7 +65,7 @@
   "home": {
     "heroBadge": "AI Intelligent Itinerary Engine",
     "titleLine": "Unlock Every Possibility",
-    "heroDesc": "Tell me your destination and preferences, and AI will craft a unique travel plan for you",
+    "heroDesc": "Tell me your target attractions and preferences, and AI will craft a unique journey for you",
     "nav": {
       "cta": "Start Planning",
       "fogOn": "Fog On",
@@ -77,7 +77,7 @@
     "cityNLabel": "City {n}",
     "atLeastOneCity": "Please add at least one city",
     "totalDays": "Total {n} days",
-    "step1": "Destination & Itinerary",
+    "step1": "Attractions & Itinerary",
     "step2": "Preferences",
     "step3": "Special Needs",
     "cityLabel": "Destination City",
@@ -147,8 +147,14 @@
       "selectDate": "Please select dates",
       "generateSuccess": "Trip plan generated successfully!",
       "generateFailed": "Generation failed",
-      "generateRetry": "Failed to generate trip plan, please try again later"
-    }
+      "generateRetry": "Failed to generate trip plan, please try again later",
+      "attractionDuplicate": "This attraction is already added",
+      "attractionTooMany": "You can add up to 10 attractions"
+    },
+    "attractionLabel": "Target Attractions",
+    "attractionPlaceholder": "Type an attraction name, press Enter to add, e.g. Forbidden City",
+    "attractionAdd": "Add",
+    "attractionRequired": "Please add at least one target attraction"
   },
   "result": {
     "backHome": "Back to Home",

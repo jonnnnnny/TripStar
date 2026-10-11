@@ -37,43 +37,35 @@
               <h3>{{ t('home.step1') }}</h3>
             </div>
 
-            <!-- 多城市动态列表 -->
-            <div class="city-list">
-              <div v-for="(cs, idx) in formData.cities" :key="idx" class="city-row">
-                <a-form-item class="city-row-name" :rules="[{ required: true, message: t('home.cityRequired') }]">
-                  <template #label>
-                    <span class="field-label">{{ t('home.cityNLabel', { n: idx + 1 }) }}</span>
-                  </template>
+            <!-- 目标景点 -->
+            <div class="attraction-list">
+              <a-form-item>
+                <template #label>
+                  <span class="field-label">{{ t('home.attractionLabel') }}</span>
+                </template>
+                <div class="attraction-input-wrap">
                   <a-input
-                    v-model:value="cs.city"
-                    :placeholder="t('home.cityPlaceholder')"
+                    v-model:value="attractionInput"
+                    :placeholder="t('home.attractionPlaceholder')"
                     size="large"
                     class="field-input"
+                    @pressEnter="addAttraction"
                   />
-                </a-form-item>
-                <a-form-item class="city-row-days">
-                  <template #label>
-                    <span class="field-label">{{ t('home.cityStayDays') }}</span>
-                  </template>
-                  <a-input-number
-                    v-model:value="cs.days"
-                    :min="1"
-                    :max="15"
-                    size="large"
-                    class="field-input"
-                    style="width: 100%"
-                  />
-                </a-form-item>
-                <button
-                  v-if="formData.cities.length > 1"
-                  type="button"
-                  class="city-remove-btn"
-                  @click="removeCity(idx)"
-                >×</button>
-              </div>
-              <button type="button" class="city-add-btn" @click="addCity">
-                + {{ t('home.addCity') }}
-              </button>
+                  <button type="button" class="attraction-add-btn" @click="addAttraction">
+                    {{ t('home.attractionAdd') }}
+                  </button>
+                </div>
+                <div v-if="formData.attractions.length" class="attraction-tags">
+                  <span
+                    v-for="(attr, idx) in formData.attractions"
+                    :key="attr + idx"
+                    class="attraction-tag"
+                  >
+                    {{ attr }}
+                    <span class="tag-remove" @click="removeAttraction(idx)">×</span>
+                  </span>
+                </div>
+              </a-form-item>
             </div>
 
             <!-- 日期与天数 -->
@@ -95,10 +87,14 @@
                 <template #label>
                   <span class="field-label">{{ t('home.travelDaysLabel') }}</span>
                 </template>
-                <div class="days-chip">
-                  <span class="days-number">{{ totalDays }}</span>
-                  <span class="days-unit">{{ t('home.travelDaysUnit') }}</span>
-                </div>
+                <a-input-number
+                  v-model:value="formData.travel_days"
+                  :min="1"
+                  :max="30"
+                  size="large"
+                  class="field-input"
+                  style="width: 100%"
+                />
               </a-form-item>
             </div>
           </div>
@@ -297,12 +293,13 @@ import { message } from 'ant-design-vue'
 import { generateTripPlan, getTripHistory } from '@/services/api'
 import { getCurrentLocale } from '@/i18n'
 import NavBar from '@/components/NavBar.vue'
-import type { TripFormData, TripTaskEvent, TripHistoryItem, CityStay } from '@/types'
+import type { TripFormData, TripTaskEvent, TripHistoryItem } from '@/types'
 import type { Dayjs } from 'dayjs'
 
 type LandingFormData = {
-  cities: Array<{ city: string; days: number }>
+  attractions: string[]
   start_date: Dayjs | null
+  travel_days: number
   transportation: string
   accommodation: string
   preferences: string[]
@@ -349,30 +346,43 @@ const formRules = computed(() => ({
 }))
 
 const formData = reactive<LandingFormData>({
-  cities: [{ city: '', days: 2 }],
+  attractions: [],
   start_date: null,
+  travel_days: 3,
   transportation: '公共交通',
   accommodation: '经济型酒店',
   preferences: [],
   free_text_input: '',
 })
 
-const totalDays = computed(() => formData.cities.reduce((sum, cs) => sum + (cs.days || 1), 0))
+const attractionInput = ref('')
+
+const addAttraction = () => {
+  const name = attractionInput.value.trim().replace(/[，,]/g, '')
+  if (!name) return
+  if (formData.attractions.includes(name)) {
+    message.warning(t('home.messages.attractionDuplicate'))
+    attractionInput.value = ''
+    return
+  }
+  if (formData.attractions.length >= 10) {
+    message.warning(t('home.messages.attractionTooMany'))
+    return
+  }
+  formData.attractions.push(name)
+  attractionInput.value = ''
+}
+
+const removeAttraction = (index: number) => {
+  formData.attractions.splice(index, 1)
+}
+
+const totalDays = computed(() => formData.travel_days || 1)
 
 const computedEndDate = computed(() => {
   if (!formData.start_date) return null
   return formData.start_date.add(totalDays.value - 1, 'day')
 })
-
-const addCity = () => {
-  if (formData.cities.length >= 5) return
-  formData.cities.push({ city: '', days: 2 })
-}
-
-const removeCity = (index: number) => {
-  if (formData.cities.length <= 1) return
-  formData.cities.splice(index, 1)
-}
 
 const heroProgress = computed(() => Math.min(scrollY.value / 320, 1))
 const toneProgress = computed(() => Math.min(Math.max((scrollY.value - 20) / 360, 0), 1))
@@ -463,10 +473,9 @@ onUnmounted(() => {
 })
 
 const handleSubmit = async () => {
-  // 校验：至少一个城市名非空
-  const validCities = formData.cities.filter(cs => cs.city.trim())
-  if (validCities.length === 0) {
-    message.error(t('home.atLeastOneCity'))
+  // 校验：至少添加一个目标景点
+  if (formData.attractions.length === 0) {
+    message.error(t('home.attractionRequired'))
     return
   }
   if (!formData.start_date) {
@@ -492,12 +501,11 @@ const handleSubmit = async () => {
     sessionStorage.removeItem('graphData')
     sessionStorage.removeItem('planId')
 
-    const citiesPayload: CityStay[] = validCities.map(cs => ({ city: cs.city.trim(), days: cs.days || 1 }))
     const endDate = computedEndDate.value!
 
     const requestData: TripFormData = {
-      city: citiesPayload[0].city,
-      cities: citiesPayload,
+      city: '',
+      attractions: [...formData.attractions],
       start_date: formData.start_date.format('YYYY-MM-DD'),
       end_date: endDate.format('YYYY-MM-DD'),
       travel_days: totalDays.value,
@@ -930,6 +938,81 @@ const handleSubmit = async () => {
   border-color: rgba(215, 110, 66, 0.9);
   background: rgba(215, 110, 66, 0.1);
   color: #d76e42;
+}
+
+/* 目标景点输入 */
+.attraction-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.attraction-input-wrap {
+  display: flex;
+  gap: 8px;
+}
+
+.attraction-input-wrap .field-input {
+  flex: 1;
+}
+
+.attraction-add-btn {
+  flex-shrink: 0;
+  padding: 0 20px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #d76e42 0%, #b8552e 100%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.attraction-add-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(215, 110, 66, 0.4);
+}
+
+.attraction-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.attraction-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 14px;
+  background: rgba(215, 110, 66, 0.12);
+  border: 1px solid rgba(215, 110, 66, 0.4);
+  border-radius: 20px;
+  color: #f0b48a;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(236, 243, 250, 0.6);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tag-remove:hover {
+  background: rgba(255, 100, 100, 0.4);
+  color: #fff;
 }
 
 .field-label {

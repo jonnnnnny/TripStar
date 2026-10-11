@@ -65,7 +65,7 @@
   "home": {
     "heroBadge": "AI 旅行プランニングエンジン",
     "titleLine": "世界を巡るあらゆる可能性へ",
-    "heroDesc": "目的地と好みを教えてください。AI があなた専用の旅程を作成します",
+    "heroDesc": "行きたいスポットと好みを教えてください。AIがあなただけの旅プランを作成します",
     "nav": {
       "cta": "プランを始める",
       "fogOn": "霧オン",
@@ -77,7 +77,7 @@
     "cityNLabel": "都市 {n}",
     "atLeastOneCity": "少なくとも1つの都市を追加してください",
     "totalDays": "合計 {n} 日",
-    "step1": "目的地と日程",
+    "step1": "スポットと日程",
     "step2": "希望設定",
     "step3": "特別な要望",
     "cityLabel": "目的地の都市",
@@ -147,8 +147,14 @@
       "selectDate": "日付を選択してください",
       "generateSuccess": "旅行プランの生成に成功しました!",
       "generateFailed": "生成に失敗しました",
-      "generateRetry": "旅行プランの生成に失敗しました。しばらくして再試行してください"
-    }
+      "generateRetry": "旅行プランの生成に失敗しました。しばらくして再試行してください",
+      "attractionDuplicate": "このスポットは既に追加されています",
+      "attractionTooMany": "スポットは最大10件まで追加できます"
+    },
+    "attractionLabel": "目的地の観光スポット",
+    "attractionPlaceholder": "スポット名を入力してEnterで追加（例：故宮）",
+    "attractionAdd": "追加",
+    "attractionRequired": "観光スポットを1つ以上追加してください"
   },
   "result": {
     "backHome": "ホームへ戻る",

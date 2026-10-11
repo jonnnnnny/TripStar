@@ -90,6 +90,7 @@ export interface TripPlan {
 export interface TripFormData {
   city: string
   cities?: CityStay[]
+  attractions?: string[]
   start_date: string
   end_date: string
   travel_days: number
