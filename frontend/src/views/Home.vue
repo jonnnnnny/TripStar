@@ -40,16 +40,32 @@
             </div>
 
             <div class="fields-grid fields-4">
-              <a-form-item name="city" :rules="formRules.city">
+              <a-form-item name="attractions" :rules="formRules.attractions" class="attraction-field">
                 <template #label>
-                  <span class="field-label">{{ t('home.cityLabel') }}</span>
+                  <span class="field-label">{{ t('home.attractionLabel') }}</span>
                 </template>
-                <a-input
-                  v-model:value="formData.city"
-                  :placeholder="t('home.cityPlaceholder')"
-                  size="large"
-                  class="dark-input"
-                />
+                <div class="attraction-input-wrap">
+                  <a-input
+                    v-model:value="attractionInput"
+                    :placeholder="t('home.attractionPlaceholder')"
+                    size="large"
+                    class="dark-input"
+                    @pressEnter="addAttraction"
+                  />
+                  <button type="button" class="add-attraction-btn" @click="addAttraction">
+                    {{ t('home.attractionAdd') }}
+                  </button>
+                </div>
+                <div v-if="formData.attractions.length" class="attraction-tags">
+                  <span
+                    v-for="(attr, idx) in formData.attractions"
+                    :key="attr + idx"
+                    class="attraction-tag"
+                  >
+                    {{ attr }}
+                    <span class="tag-remove" @click="removeAttraction(idx)">×</span>
+                  </span>
+                </div>
               </a-form-item>
 
               <a-form-item name="start_date" :rules="formRules.startDate">
@@ -231,7 +247,13 @@ const interestOptions = [
 ]
 
 const formRules = computed(() => ({
-  city: [{ required: true, message: t('home.cityRequired') }],
+  attractions: [{
+    required: true,
+    validator: (_rule: unknown, _value: unknown) =>
+      formData.attractions.length > 0
+        ? Promise.resolve()
+        : Promise.reject(t('home.attractionRequired')),
+  }],
   startDate: [{ required: true, message: t('home.startDateRequired') }],
   endDate: [{ required: true, message: t('home.endDateRequired') }],
 }))
@@ -243,6 +265,7 @@ type HomeFormData = Omit<TripFormData, 'start_date' | 'end_date'> & {
 
 const formData = reactive<HomeFormData>({
   city: '',
+  attractions: [],
   start_date: null,
   end_date: null,
   travel_days: 1,
@@ -251,6 +274,28 @@ const formData = reactive<HomeFormData>({
   preferences: [],
   free_text_input: ''
 })
+
+const attractionInput = ref('')
+
+const addAttraction = () => {
+  const name = attractionInput.value.trim().replace(/[，,]/g, '')
+  if (!name) return
+  if (formData.attractions.includes(name)) {
+    message.warning(t('home.messages.attractionDuplicate'))
+    attractionInput.value = ''
+    return
+  }
+  if (formData.attractions.length >= 10) {
+    message.warning(t('home.messages.attractionTooMany'))
+    return
+  }
+  formData.attractions.push(name)
+  attractionInput.value = ''
+}
+
+const removeAttraction = (idx: number) => {
+  formData.attractions.splice(idx, 1)
+}
 
 const togglePreference = (value: string) => {
   const idx = formData.preferences.indexOf(value)
@@ -306,7 +351,8 @@ const handleSubmit = async () => {
     sessionStorage.removeItem('planId')
 
     const requestData: TripFormData = {
-      city: formData.city,
+      city: '',
+      attractions: [...formData.attractions],
       start_date: formData.start_date.format('YYYY-MM-DD'),
       end_date: formData.end_date.format('YYYY-MM-DD'),
       travel_days: formData.travel_days,
@@ -640,6 +686,82 @@ const handleSubmit = async () => {
 .dark-select :deep(.ant-select-focused .ant-select-selector) {
   border-color: #FFB347 !important;
   box-shadow: 0 0 0 3px rgba(255, 179, 71, 0.12) !important;
+}
+
+/* 目标景点输入 */
+.attraction-field {
+  grid-column: span 1;
+}
+
+.attraction-input-wrap {
+  display: flex;
+  gap: 8px;
+}
+
+.attraction-input-wrap .dark-input {
+  flex: 1;
+}
+
+.add-attraction-btn {
+  flex-shrink: 0;
+  height: 48px;
+  padding: 0 20px;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #FFB347 0%, #FF6B6B 100%);
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 16px rgba(255, 107, 107, 0.25);
+}
+
+.add-attraction-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(255, 107, 107, 0.35);
+}
+
+.attraction-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.attraction-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 14px;
+  background: rgba(255, 179, 71, 0.12);
+  border: 1px solid rgba(255, 179, 71, 0.35);
+  border-radius: 20px;
+  color: #FFD699;
+  font-size: 13px;
+  font-weight: 500;
+  animation: fadeUp 0.3s ease-out;
+}
+
+.tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tag-remove:hover {
+  background: rgba(255, 107, 107, 0.4);
+  color: #fff;
 }
 
 /* 天数芯片 */
