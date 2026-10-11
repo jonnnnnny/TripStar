@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Callable, Awaitable, Optional
 from hello_agents import SimpleAgent
 from hello_agents.tools import MCPTool
 from ..services.llm_service import get_llm
-from ..models.schemas import TripRequest, TripPlan, DayPlan, Attraction, Meal, WeatherInfo, Location, Hotel
+from ..models.schemas import TripRequest, TripPlan, DayPlan, Attraction, Meal, WeatherInfo, Location, Hotel, CityStay
 from ..config import get_settings
 
 # ============ Agent提示词 (动态模版化，支持 amap / google 双供应商) ============
@@ -166,9 +166,10 @@ PLANNER_AGENT_PROMPT = """你是行程规划专家。你的任务是根据景点
    - 餐饮预估费用(estimated_cost)
    - 酒店预估费用(estimated_cost)
    - 预算汇总(budget)包含各项总费用
-8. **预约信息透传**: 如果景点搜索数据中包含 reservation_required 和 reservation_tips 字段，请务必将它们完整保留在对应景点的JSON中。需要预约的景点请在 description 中也提醒游客提前预约
-9. **景点图片**: 不需要在JSON中填写 image_url 字段，图片由前端根据景点名称自动从小红书获取。
-10. **多城市行程要求**:
+8. **目标景点必含**: 如果用户查询中给出了"用户指定的目标景点"列表，这些景点必须全部出现在行程的 attractions 中，一个都不能遗漏；可顺路补充其他景点，但不得用其他景点替换目标景点
+9. **预约信息透传**: 如果景点搜索数据中包含 reservation_required 和 reservation_tips 字段，请务必将它们完整保留在对应景点的JSON中。需要预约的景点请在 description 中也提醒游客提前预约
+10. **景点图片**: 不需要在JSON中填写 image_url 字段，图片由前端根据景点名称自动从小红书获取。
+11. **多城市行程要求**:
     - 每个 day 对象中必须包含 "city" 字段标明当天所在城市
     - 城市切换当天设置 "is_transfer_day": true，并在 "transfer_info" 中**仅给出交通方式建议和大致时长**（如"建议乘坐高铁，约2-3小时"），**禁止编造具体车次、班次号、出发时间、到达时间等不可验证的信息**
     - 城际移动日的景点数量可适当减少为1-2个
@@ -379,6 +380,81 @@ class MultiAgentTripPlanner:
         if asyncio.iscoroutine(result):
             await result
 
+    def _resolve_attraction_cities(self, attractions: List[str]) -> Dict[str, str]:
+        """将目标景点解析为所在城市（LLM 知识解析）。
+
+        Args:
+            attractions: 目标景点名称列表
+
+        Returns:
+            {景点名: 城市名}，解析失败的景点对应空字符串
+        """
+        llm = get_llm()
+        prompt = (
+            "请判断以下每个景点所在的城市，只返回一个 JSON 对象，格式如 "
+            "{\"故宫\": \"北京\", \"西湖\": \"杭州\"}。"
+            "要求：城市名使用简洁中文名，不要带省份/国家前缀；"
+            "无法判断的景点其值设为空字符串；不要输出任何解释文字。\n"
+            f"景点列表：{json.dumps(attractions, ensure_ascii=False)}"
+        )
+        try:
+            content = llm.invoke(
+                [{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=500,
+                stream=False,
+            )
+            import re as _re
+            match = _re.search(r"\{[\s\S]*\}", content or "")
+            if not match:
+                print(f"⚠️  景点城市解析未返回 JSON: {content[:100]}")
+                return {a: "" for a in attractions}
+            mapping = json.loads(match.group())
+            result = {}
+            for a in attractions:
+                city = str(mapping.get(a, "") or "").strip()
+                # 去掉可能的 "中国-" / 省份前缀
+                city = city.split("-")[-1].strip()
+                result[a] = city
+            print(f"🗺️  景点城市解析结果: {json.dumps(result, ensure_ascii=False)}")
+            return result
+        except Exception as e:
+            print(f"⚠️  景点城市解析失败: {e}")
+            return {a: "" for a in attractions}
+
+    @staticmethod
+    def _derive_city_stays(
+        attraction_city_map: Dict[str, str], travel_days: int
+    ) -> List[CityStay]:
+        """按景点所在城市分组，并按景点数量比例分配停留天数。
+
+        Args:
+            attraction_city_map: {景点名: 城市名}（空城市名归入"待定"组）
+            travel_days: 总旅行天数
+
+        Returns:
+            CityStay 列表（保持景点首次出现顺序）
+        """
+        from collections import OrderedDict
+
+        city_groups: "OrderedDict[str, List[str]]" = OrderedDict()
+        for attr, city in attraction_city_map.items():
+            city = city or "待定"
+            city_groups.setdefault(city, []).append(attr)
+
+        total = max(len(attraction_city_map), 1)
+        stays: List[CityStay] = []
+        assigned = 0
+        items = list(city_groups.items())
+        for i, (city, attrs) in enumerate(items):
+            if i == len(items) - 1:
+                days = travel_days - assigned
+            else:
+                days = max(1, round(travel_days * len(attrs) / total))
+                assigned += days
+            stays.append(CityStay(city=city, days=max(1, days)))
+        return stays
+
     async def _fallback_amap_weather(self, city: str) -> str:
         """使用高德天气 HTTP REST API 直接获取天气, 作为 Google Weather 的降级备选。
 
@@ -435,7 +511,30 @@ class MultiAgentTripPlanner:
             旅行计划
         """
         try:
-            cities = request.cities  # List[CityStay] — 已由 normalize_cities 保证非空
+            # ========== 按景点模式：从目标景点推导城市 ==========
+            target_attractions: List[str] = [
+                a.strip() for a in (getattr(request, "attractions", []) or []) if a and a.strip()
+            ]
+            # 去重（保持顺序）
+            target_attractions = list(dict.fromkeys(target_attractions))
+            attraction_city_map: Dict[str, str] = {}
+
+            if target_attractions and not request.cities:
+                print(f"\n🎯 按景点模式: 目标景点 {target_attractions}")
+                await self._emit_progress(
+                    progress_callback, "attraction_search",
+                    f"正在解析 {len(target_attractions)} 个目标景点所在城市...",
+                    8,
+                )
+                attraction_city_map = await asyncio.to_thread(
+                    self._resolve_attraction_cities, target_attractions
+                )
+                request.cities = self._derive_city_stays(attraction_city_map, request.travel_days)
+                if request.cities:
+                    request.city = request.cities[0].city
+                print(f"🗺️  推导行程城市: {' → '.join(f'{cs.city}({cs.days}天)' for cs in request.cities)}")
+
+            cities = request.cities  # List[CityStay] — 已由 normalize_cities / 景点推导保证非空
             total_cities = len(cities)
             city_names = [cs.city for cs in cities]
 
@@ -471,9 +570,28 @@ class MultiAgentTripPlanner:
                     f"正在搜索 {city} 的景点...{city_label}",
                     progress_base
                 )
-                attraction_response = await asyncio.to_thread(
-                    search_xhs_attractions, city, keywords, _lang
-                )
+                if target_attractions:
+                    # 按景点模式：逐个搜索用户指定的目标景点详情
+                    city_targets = [a for a in target_attractions if attraction_city_map.get(a, "待定") == city]
+                    if not city_targets:
+                        city_targets = []
+                    _parts = []
+                    for _attr_name in city_targets:
+                        print(f"     🎯 搜索目标景点: {_attr_name}")
+                        _part = await asyncio.to_thread(
+                            search_xhs_attractions, city, _attr_name, _lang
+                        )
+                        _parts.append(f"【用户指定的目标景点: {_attr_name}】\n{_part}")
+                    if not _parts:
+                        # 兜底：该城市无指定景点时按偏好关键词搜索
+                        _parts.append(await asyncio.to_thread(
+                            search_xhs_attractions, city, keywords, _lang
+                        ))
+                    attraction_response = "\n\n".join(_parts)
+                else:
+                    attraction_response = await asyncio.to_thread(
+                        search_xhs_attractions, city, keywords, _lang
+                    )
                 all_attractions[city] = attraction_response
                 print(f"📍 {city} 景点搜索结果: {attraction_response[:150]}...")
 
@@ -536,6 +654,8 @@ class MultiAgentTripPlanner:
                 all_weather,
                 all_hotels,
                 memory_snippet,
+                target_attractions=target_attractions,
+                attraction_city_map=attraction_city_map,
             )
             print(f"行程规划结果: {planner_response[:300]}...\n")
 
@@ -584,6 +704,8 @@ class MultiAgentTripPlanner:
         weather: Dict[str, str],
         hotels: Dict[str, str],
         memory_snippet: str = "",
+        target_attractions: Optional[List[str]] = None,
+        attraction_city_map: Optional[Dict[str, str]] = None,
     ) -> str:
         """规划阶段使用更长超时，并在超时后重试一次。
 
@@ -592,9 +714,15 @@ class MultiAgentTripPlanner:
             weather: {city_name: 天气查询结果文本}
             hotels: {city_name: 酒店搜索结果文本}
             memory_snippet: 用户历史偏好文本，注入规划 Prompt
+            target_attractions: 用户指定的目标景点列表（按景点模式）
+            attraction_city_map: {景点名: 城市名}
         """
         timeout = int(os.getenv("TRIP_PLANNER_TIMEOUT", "180"))
-        planner_query = self._build_planner_query(request, attractions, weather, hotels, memory_snippet)
+        planner_query = self._build_planner_query(
+            request, attractions, weather, hotels, memory_snippet,
+            target_attractions=target_attractions or [],
+            attraction_city_map=attraction_city_map or {},
+        )
 
         try:
             return await asyncio.to_thread(
@@ -627,18 +755,24 @@ class MultiAgentTripPlanner:
         weather: Dict[str, str],
         hotels: Dict[str, str],
         memory_snippet: str = "",
+        target_attractions: Optional[List[str]] = None,
+        attraction_city_map: Optional[Dict[str, str]] = None,
     ) -> str:
-        """构建行程规划查询（支持多城市）
+        """构建行程规划查询（支持多城市 / 按景点模式）
 
         Args:
             attractions: {city_name: 景点搜索结果文本}
             weather: {city_name: 天气查询结果文本}
             hotels: {city_name: 酒店搜索结果文本}
             memory_snippet: 用户历史偏好文本
+            target_attractions: 用户指定的目标景点列表（按景点模式）
+            attraction_city_map: {景点名: 城市名}
         """
         cities = request.cities
         total_cities = len(cities)
         is_multi_city = total_cities > 1
+        target_attractions = target_attractions or []
+        attraction_city_map = attraction_city_map or {}
 
         # 构建城市停留计划描述
         if is_multi_city:
@@ -665,6 +799,16 @@ class MultiAgentTripPlanner:
 - 交通方式: {request.transportation}
 - 住宿: {request.accommodation}
 - 偏好: {', '.join(request.preferences) if request.preferences else '无'}
+"""
+        if target_attractions:
+            _target_lines = "\n".join(
+                f"- {a}（{attraction_city_map.get(a) or '待定'}）" for a in target_attractions
+            )
+            query += f"""
+**用户指定的目标景点（必须全部安排进行程中，一个都不能遗漏）:**
+{_target_lines}
+- 行程必须覆盖以上全部目标景点，可根据地理位置就近补充其他顺路景点
+- 每个目标景点安排充足的游览时间（参考其 visit_duration）
 """
         if memory_snippet:
             query += f"""
@@ -1069,22 +1213,38 @@ JSON 的 key 名称保持英文不变，只翻译 value 中的文字。"""
     def _create_fallback_plan(self, request: TripRequest) -> TripPlan:
         """创建备用计划(当Agent失败时)"""
         from datetime import datetime, timedelta
-        
+
         # 解析日期
         start_date = datetime.strptime(request.start_date, "%Y-%m-%d")
-        
+
+        # 按景点模式：优先使用用户指定的目标景点名称
+        target_attractions: List[str] = [
+            a.strip() for a in (getattr(request, "attractions", []) or []) if a and a.strip()
+        ]
+        city_label = request.city or (target_attractions[0] if target_attractions else "")
+
         # 创建每日行程
         days = []
         for i in range(request.travel_days):
             current_date = start_date + timedelta(days=i)
-            
-            day_plan = DayPlan(
-                date=current_date.strftime("%Y-%m-%d"),
-                day_index=i,
-                description=f"第{i+1}天行程",
-                transportation=request.transportation,
-                accommodation=request.accommodation,
-                attractions=[
+
+            if target_attractions:
+                # 将目标景点均匀分配到各天
+                per_day = max(1, (len(target_attractions) + request.travel_days - 1) // request.travel_days)
+                day_attrs = target_attractions[i * per_day:(i + 1) * per_day] or [target_attractions[0]]
+                attractions = [
+                    Attraction(
+                        name=name,
+                        address=f"{city_label}",
+                        location=Location(longitude=116.4 + i * 0.01, latitude=39.9 + i * 0.01),
+                        visit_duration=180,
+                        description=f"{name}（用户指定的目标景点）",
+                        category="景点"
+                    )
+                    for name in day_attrs
+                ]
+            else:
+                attractions = [
                     Attraction(
                         name=f"{request.city}景点{j+1}",
                         address=f"{request.city}市",
@@ -1094,7 +1254,15 @@ JSON 的 key 名称保持英文不变，只翻译 value 中的文字。"""
                         category="景点"
                     )
                     for j in range(2)
-                ],
+                ]
+
+            day_plan = DayPlan(
+                date=current_date.strftime("%Y-%m-%d"),
+                day_index=i,
+                description=f"第{i+1}天行程",
+                transportation=request.transportation,
+                accommodation=request.accommodation,
+                attractions=attractions,
                 meals=[
                     Meal(type="breakfast", name=f"第{i+1}天早餐", description="当地特色早餐"),
                     Meal(type="lunch", name=f"第{i+1}天午餐", description="午餐推荐"),
@@ -1102,14 +1270,14 @@ JSON 的 key 名称保持英文不变，只翻译 value 中的文字。"""
                 ]
             )
             days.append(day_plan)
-        
+
         return TripPlan(
             city=request.city,
             start_date=request.start_date,
             end_date=request.end_date,
             days=days,
             weather_info=[],
-            overall_suggestions=f"这是为您规划的{request.city}{request.travel_days}日游行程,建议提前查看各景点的开放时间。"
+            overall_suggestions=f"这是为您规划的{city_label}{request.travel_days}日游行程,建议提前查看各景点的开放时间。"
         )
 
 

@@ -17,6 +17,7 @@ class TripRequest(BaseModel):
     """旅行规划请求"""
     city: str = Field(default="", description="目的地城市(单城市兼容)", example="北京")
     cities: List[CityStay] = Field(default=[], description="多城市行程配置")
+    attractions: List[str] = Field(default=[], description="目标景点列表(按景点生成攻略时填写,城市将自动推导)", example=["故宫", "颐和园"])
     start_date: str = Field(..., description="开始日期 YYYY-MM-DD", example="2025-06-01")
     end_date: str = Field(..., description="结束日期 YYYY-MM-DD", example="2025-06-03")
     travel_days: int = Field(..., description="旅行天数", ge=1, le=30, example=3)
@@ -34,6 +35,7 @@ class TripRequest(BaseModel):
             self.cities = [CityStay(city=self.city, days=self.travel_days)]
         if self.cities and not self.city:
             self.city = self.cities[0].city
+        # 按景点模式: 只填了 attractions 时 cities 留空,由 Agent 解析景点所在城市后推导
         return self
 
     class Config:
@@ -41,6 +43,7 @@ class TripRequest(BaseModel):
             "example": {
                 "city": "北京",
                 "cities": [{"city": "北京", "days": 2}, {"city": "西安", "days": 3}],
+                "attractions": ["故宫", "颐和园"],
                 "start_date": "2025-06-01",
                 "end_date": "2025-06-05",
                 "travel_days": 5,

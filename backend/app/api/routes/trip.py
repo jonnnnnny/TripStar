@@ -161,6 +161,7 @@ def _build_history_item(task_id: str, payload: Dict[str, Any], updated_at: str) 
 
     city = plan.get("city") or request_payload.get("city") or ""
     cities = plan.get("cities") or []
+    attractions = request_payload.get("attractions") or []
     start_date = plan.get("start_date") or request_payload.get("start_date") or ""
     end_date = plan.get("end_date") or request_payload.get("end_date") or ""
     days = plan.get("days") or []
@@ -170,14 +171,18 @@ def _build_history_item(task_id: str, payload: Dict[str, Any], updated_at: str) 
     if not city and not cities:
         return None
 
-    # 多城市时 city 显示为 "北京 → 西安" 形式
-    display_city = ' → '.join(cities) if len(cities) > 1 else city
+    # 多城市时 city 显示为 "北京 → 西安" 形式；按景点模式时优先显示目标景点
+    if attractions:
+        display_city = '、'.join(attractions[:4]) + ('…' if len(attractions) > 4 else '')
+    else:
+        display_city = ' → '.join(cities) if len(cities) > 1 else city
 
     return {
         "plan_id": payload.get("plan_id", task_id),
         "task_id": task_id,
         "city": display_city,
         "cities": cities,
+        "attractions": attractions,
         "start_date": start_date,
         "end_date": end_date,
         "travel_days": travel_days,
@@ -292,8 +297,11 @@ async def plan_trip(request: TripRequest):
     _persist_task_state(task_id, _tasks[task_id])
 
     _city_display = ' → '.join(cs.city for cs in request.cities) if request.cities else request.city
+    _attractions_display = '、'.join(request.attractions) if getattr(request, 'attractions', None) else ''
     print(f"\n{'=' * 60}")
     print(f"📥 收到旅行规划请求 (task_id={task_id}):")
+    if _attractions_display:
+        print(f"   目标景点: {_attractions_display}")
     print(f"   城市: {_city_display}")
     print(f"   日期: {request.start_date} - {request.end_date}")
     print(f"   天数: {request.travel_days}")
@@ -326,6 +334,7 @@ async def _save_preferences_after_trip(user_id: str, request: TripRequest, trip_
 
         user_query = (
             f"城市: {request.city}; "
+            f"目标景点: {'、'.join(getattr(request, 'attractions', []) or []) or '无'}; "
             f"偏好: {', '.join(request.preferences) if request.preferences else '无'}; "
             f"额外要求: {request.free_text_input or '无'}"
         )
