@@ -6,6 +6,8 @@ services:
       args:
         VITE_AMAP_WEB_JS_KEY: ${VITE_AMAP_WEB_JS_KEY:-your_amap_web_js_api_key_here}
         VITE_AMAP_SECURITY_JS_CODE: ${VITE_AMAP_SECURITY_JS_CODE:-your_amap_security_js_code_here}
+    # 始终本地构建，不从镜像仓库拉取，方便调试
+    pull_policy: build
     container_name: helloagents-trip-planner
     ports:
       - "7860:7860"
@@ -33,6 +35,9 @@ services:
       - LOG_LEVEL=INFO
     volumes:
       - trip_data:/app/backend/data
+      # 调试挂载：后端 Python 代码改动后只需 docker compose restart，无需重新构建镜像
+      # （仅挂载 app 目录，避免覆盖镜像内 backend/node_modules 的小红书签名依赖）
+      - ./backend/app:/app/backend/app
     restart: unless-stopped
 
 volumes:
