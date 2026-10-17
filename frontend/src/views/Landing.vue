@@ -473,6 +473,10 @@ onUnmounted(() => {
 })
 
 const handleSubmit = async () => {
+  // 输入框里还有没点的景点名，提交时自动加上
+  if (attractionInput.value.trim()) {
+    addAttraction()
+  }
   // 校验：至少添加一个目标景点
   if (formData.attractions.length === 0) {
     message.error(t('home.attractionRequired'))

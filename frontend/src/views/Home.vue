@@ -186,6 +186,7 @@
               class="submit-btn"
               :class="{ loading: loading }"
               :disabled="loading"
+              @click="addAttraction"
             >
               <span v-if="!loading" class="btn-content">
                 <span>{{ t('home.submit') }}</span>

@@ -3,7 +3,7 @@
 import json
 import asyncio
 import os
-from typing import Dict, Any, List, Callable, Awaitable, Optional
+from typing import Dict, Any, List, Callable, Awaitable, Optional, Tuple
 from hello_agents import SimpleAgent
 from hello_agents.tools import MCPTool
 from ..services.llm_service import get_llm
@@ -425,15 +425,19 @@ class MultiAgentTripPlanner:
     @staticmethod
     def _derive_city_stays(
         attraction_city_map: Dict[str, str], travel_days: int
-    ) -> List[CityStay]:
+    ) -> "Tuple[List[CityStay], Dict[str, str]]":
         """按景点所在城市分组，并按景点数量比例分配停留天数。
+
+        保证返回的总天数恒等于 travel_days（最大余数法），每城至少 1 天。
+        城市数超过总天数时，把景点最少的城市合并到景点最多的城市，
+        并同步更新返回的 city_map，保证搜索与行程一致、不遗漏景点。
 
         Args:
             attraction_city_map: {景点名: 城市名}（空城市名归入"待定"组）
             travel_days: 总旅行天数
 
         Returns:
-            CityStay 列表（保持景点首次出现顺序）
+            (CityStay 列表, 更新后的 {景点名: 城市名})
         """
         from collections import OrderedDict
 
@@ -442,18 +446,49 @@ class MultiAgentTripPlanner:
             city = city or "待定"
             city_groups.setdefault(city, []).append(attr)
 
-        total = max(len(attraction_city_map), 1)
-        stays: List[CityStay] = []
-        assigned = 0
         items = list(city_groups.items())
-        for i, (city, attrs) in enumerate(items):
-            if i == len(items) - 1:
-                days = travel_days - assigned
-            else:
-                days = max(1, round(travel_days * len(attrs) / total))
-                assigned += days
-            stays.append(CityStay(city=city, days=max(1, days)))
-        return stays
+        if not items:
+            return [], dict(attraction_city_map)
+
+        # 城市数超过总天数时合并：CityStay 要求每天至少 1 天，无法为超出的城市单独分配
+        effective_map = dict(attraction_city_map)
+        items.sort(key=lambda kv: len(kv[1]), reverse=True)
+        while len(items) > travel_days:
+            small_city, small_attrs = items.pop()
+            big_city, big_attrs = items[0]
+            items[0] = (big_city, big_attrs + small_attrs)
+            for a in small_attrs:
+                effective_map[a] = big_city
+
+        total = sum(len(attrs) for _, attrs in items)
+        n = len(items)
+        # 最大余数法：先向下取整，再按余数从大到小分配剩余天数
+        rows = []
+        for city, attrs in items:
+            exact = travel_days * len(attrs) / total
+            floored = int(exact)
+            rows.append({"city": city, "days": floored, "rem": exact - floored})
+        # 每城至少 1 天（此时 n <= travel_days，保证可行）
+        for r in rows:
+            if r["days"] < 1:
+                r["days"] = 1
+        diff = travel_days - sum(r["days"] for r in rows)
+        by_rem = sorted(range(n), key=lambda i: rows[i]["rem"], reverse=True)
+        if diff > 0:
+            for i in by_rem:
+                if diff <= 0:
+                    break
+                rows[i]["days"] += 1
+                diff -= 1
+        elif diff < 0:
+            for i in reversed(by_rem):
+                if diff >= 0:
+                    break
+                if rows[i]["days"] > 1:
+                    rows[i]["days"] -= 1
+                    diff += 1
+        stays = [CityStay(city=r["city"], days=r["days"]) for r in rows]
+        return stays, effective_map
 
     async def _fallback_amap_weather(self, city: str) -> str:
         """使用高德天气 HTTP REST API 直接获取天气, 作为 Google Weather 的降级备选。
@@ -529,7 +564,27 @@ class MultiAgentTripPlanner:
                 attraction_city_map = await asyncio.to_thread(
                     self._resolve_attraction_cities, target_attractions
                 )
-                request.cities = self._derive_city_stays(attraction_city_map, request.travel_days)
+                # 未能解析出所在城市的景点：挂靠到景点最多的已解析城市，保证不遗漏；
+                # 全部未解析则直接报错，比生成"待定市"的乱行程更诚实
+                _resolved_cities = {c for c in attraction_city_map.values() if c}
+                _unresolved = [a for a, c in attraction_city_map.items() if not c]
+                if _unresolved:
+                    if not _resolved_cities:
+                        raise ValueError(
+                            "无法识别这些景点所在的城市（"
+                            + "、".join(_unresolved)
+                            + "），请检查景点名称是否正确"
+                        )
+                    _top_city = max(
+                        _resolved_cities,
+                        key=lambda c: sum(1 for v in attraction_city_map.values() if v == c),
+                    )
+                    for _a in _unresolved:
+                        attraction_city_map[_a] = _top_city
+                    print(f"⚠️  {', '.join(_unresolved)} 未能解析出所在城市，已挂靠到{_top_city}")
+                request.cities, attraction_city_map = self._derive_city_stays(
+                    attraction_city_map, request.travel_days
+                )
                 if request.cities:
                     request.city = request.cities[0].city
                 print(f"🗺️  推导行程城市: {' → '.join(f'{cs.city}({cs.days}天)' for cs in request.cities)}")
