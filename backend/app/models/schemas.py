@@ -22,7 +22,7 @@ class TripRequest(BaseModel):
     end_date: str = Field(..., description="结束日期 YYYY-MM-DD", example="2025-06-03")
     travel_days: int = Field(..., description="旅行天数", ge=1, le=30, example=3)
     transportation: str = Field(..., description="交通方式", example="公共交通")
-    accommodation: str = Field(..., description="住宿偏好", example="经济型酒店")
+    accommodation: Union[str, List[str]] = Field(..., description="住宿偏好(可多选)", example=["经济型酒店", "民宿"])
     preferences: List[str] = Field(default=[], description="旅行偏好标签", example=["历史文化", "美食"])
     free_text_input: Optional[str] = Field(default="", description="额外要求", example="希望多安排一些博物馆")
     language: Optional[str] = Field(default="zh", description="输出语言(zh/en/ja)", example="en")
@@ -36,7 +36,16 @@ class TripRequest(BaseModel):
         if self.cities and not self.city:
             self.city = self.cities[0].city
         # 按景点模式: 只填了 attractions 时 cities 留空,由 Agent 解析景点所在城市后推导
+        # 住宿偏好统一为列表(兼容旧客户端传单个字符串)
+        if isinstance(self.accommodation, str):
+            self.accommodation = [self.accommodation] if self.accommodation else []
+        self.accommodation = [a for a in self.accommodation if a]
         return self
+
+    def accommodation_text(self) -> str:
+        """住宿偏好展示文本(多选用"、"连接)"""
+        acc = self.accommodation if isinstance(self.accommodation, list) else [self.accommodation]
+        return "、".join(a for a in acc if a) or "经济型酒店"
 
     class Config:
         json_schema_extra = {

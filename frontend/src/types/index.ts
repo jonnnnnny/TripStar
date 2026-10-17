@@ -95,7 +95,7 @@ export interface TripFormData {
   end_date: string
   travel_days: number
   transportation: string
-  accommodation: string
+  accommodation: string[]
   preferences: string[]
   free_text_input: string
   language?: string

@@ -131,7 +131,7 @@
                 <template #label>
                   <span class="field-label">{{ t('home.accommodationLabel') }}</span>
                 </template>
-                <a-select v-model:value="formData.accommodation" size="large" class="dark-select">
+                <a-select v-model:value="formData.accommodation" mode="multiple" size="large" class="dark-select">
                   <a-select-option value="经济型酒店">{{ t('home.accommodation.budget') }}</a-select-option>
                   <a-select-option value="舒适型酒店">{{ t('home.accommodation.comfort') }}</a-select-option>
                   <a-select-option value="豪华酒店">{{ t('home.accommodation.luxury') }}</a-select-option>
@@ -271,7 +271,7 @@ const formData = reactive<HomeFormData>({
   end_date: null,
   travel_days: 1,
   transportation: '公共交通',
-  accommodation: '经济型酒店',
+  accommodation: ['经济型酒店'],
   preferences: [],
   free_text_input: ''
 })

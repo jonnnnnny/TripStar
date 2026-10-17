@@ -60,11 +60,13 @@ def _build_hotel_agent_prompt(tool_prefix: str) -> str:
 **示例:**
 用户: "搜索北京的酒店"
 你的回复: [TOOL_CALL:{tool_name}:keywords=酒店,city=北京]
+用户: "搜索北京故宫附近的经济型酒店"
+你的回复: [TOOL_CALL:{tool_name}:keywords=故宫附近经济型酒店,city=北京]
 
 **注意:**
 1. 必须使用工具,不要直接回答
 2. 格式必须完全正确,包括方括号和冒号
-3. 关键词使用"酒店"或"宾馆"
+3. 关键词使用"酒店"或"宾馆"，可按用户要求加上景点名+"附近"作限定（如"故宫附近酒店"）、加上住宿风格（如"经济型酒店"）
 4. 必须输出 `{tool_name}` 作为工具名。
 """
 
@@ -679,7 +681,18 @@ class MultiAgentTripPlanner:
                     f"正在搜索 {city} 的酒店...{city_label}",
                     progress_base + progress_step * 2
                 )
-                hotel_query = f"请搜索{city}的{request.accommodation}酒店{_lang_hint}"
+                # [3] 酒店搜索：按景点推荐（景点附近的酒店），支持多种住宿风格
+                _styles_text = request.accommodation_text()
+                _city_targets = []
+                if target_attractions:
+                    _city_targets = [a for a in target_attractions if attraction_city_map.get(a) == city]
+                if _city_targets:
+                    hotel_query = (
+                        f"请搜索{city}以下景点附近的酒店：{'、'.join(_city_targets)}；"
+                        f"住宿风格包括：{_styles_text}，每种风格推荐1-2家{_lang_hint}"
+                    )
+                else:
+                    hotel_query = f"请搜索{city}的{_styles_text}酒店，每种风格推荐1-2家{_lang_hint}"
                 hotel_response = await asyncio.to_thread(self.hotel_agent.run, hotel_query)
                 all_hotels[city] = hotel_response
                 print(f"🏨 {city} 酒店搜索结果: {hotel_response[:150]}...")
@@ -852,7 +865,7 @@ class MultiAgentTripPlanner:
 - 总天数: {request.travel_days}天
 - 日期: {request.start_date} 至 {request.end_date}
 - 交通方式: {request.transportation}
-- 住宿: {request.accommodation}
+- 住宿: {request.accommodation_text()}
 - 偏好: {', '.join(request.preferences) if request.preferences else '无'}
 """
         if target_attractions:
@@ -1316,7 +1329,7 @@ JSON 的 key 名称保持英文不变，只翻译 value 中的文字。"""
                 day_index=i,
                 description=f"第{i+1}天行程",
                 transportation=request.transportation,
-                accommodation=request.accommodation,
+                accommodation=request.accommodation_text(),
                 attractions=attractions,
                 meals=[
                     Meal(type="breakfast", name=f"第{i+1}天早餐", description="当地特色早餐"),
